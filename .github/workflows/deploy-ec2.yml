@@ -58,13 +58,42 @@ jobs:
           command_timeout: 20m
           debug: true
           script: |
+            # Instalar Docker si no está instalado
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando Docker..."
+              sudo apt-get update
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+              sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              sudo apt-get update
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker $USER
+              echo "Docker instalado correctamente"
+            fi
+            
+            # Verificar que Docker esté en ejecución
+            if ! sudo systemctl is-active --quiet docker; then
+              echo "Docker no está en ejecución. Iniciando Docker..."
+              sudo systemctl start docker
+            fi
+            
+            # Instalar Docker Compose si no está instalado
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Docker Compose no está instalado. Instalando Docker Compose..."
+              sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              echo "Docker Compose instalado correctamente"
+            fi
+            
             # Verificar versiones de Docker y Docker Compose
-            docker --version
+            sudo docker --version
             docker-compose --version
             
             # Mostrar contenedores actuales
             echo "Contenedores actuales:"
-            docker ps
+            sudo docker ps
             
             # Crear directorio si no existe
             mkdir -p ~/orders-canceler
@@ -72,16 +101,16 @@ jobs:
             
             # Detener contenedores existentes
             echo "Deteniendo contenedores existentes..."
-            docker-compose down || true
-            docker rm -f orders-canceler orders-db orders-grafana || true
+            sudo docker-compose down || true
+            sudo docker rm -f orders-canceler orders-db orders-grafana || true
             
             # Eliminar imágenes antiguas
             echo "Eliminando imágenes antiguas..."
-            docker rmi -f ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest || true
+            sudo docker rmi -f ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest || true
             
             # Descargar imagen más reciente
             echo "Descargando imagen más reciente..."
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
             
             # Crear .env file con secretos
             cat > .env << EOL
@@ -154,11 +183,11 @@ jobs:
             
             # Eliminar red existente si existe
             echo "Eliminando red existente si existe..."
-            docker network rm orders-network || true
+            sudo docker network rm orders-network || true
             
             # Iniciar servicios
             echo "Iniciando servicios..."
-            docker-compose up -d --force-recreate
+            sudo docker-compose up -d --force-recreate
             
             # Esperar a que los contenedores estén en funcionamiento
             echo "Esperando a que los contenedores estén en funcionamiento..."
@@ -166,21 +195,21 @@ jobs:
             
             # Verificar estado de los contenedores
             echo "Estado de los contenedores:"
-            docker ps
+            sudo docker ps
             
             # Mostrar contenedores en ejecución
             echo "Contenedores en ejecución:"
-            docker ps
+            sudo docker ps
             
             # Mostrar logs del contenedor principal
             echo "Logs del contenedor orders-canceler:"
-            docker logs orders-canceler
+            sudo docker logs orders-canceler
             
             # Información de depuración
             echo "Información de depuración:"
             echo "Redes Docker:"
-            docker network ls
+            sudo docker network ls
             echo "Volúmenes Docker:"
-            docker volume ls
+            sudo docker volume ls
             echo "Logs detallados del contenedor orders-canceler (últimas 50 líneas):"
-            docker logs orders-canceler --tail 50
+            sudo docker logs orders-canceler --tail 50
