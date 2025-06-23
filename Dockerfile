@@ -1,10 +1,18 @@
-FROM gradle:7.6.1-jdk17 AS build
-WORKDIR /app
-COPY . .
-RUN gradle build --no-daemon -x test
+FROM eclipse-temurin:21-jdk-alpine AS build
+WORKDIR /workspace/app
 
-FROM eclipse-temurin:17-jre-alpine
-WORKDIR /app
-COPY --from=build /app/build/libs/*.jar app.jar
-EXPOSE 8082
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Instalar Gradle
+RUN apk add --no-cache gradle
+
+# Copiar archivos del proyecto
+COPY build.gradle .
+COPY settings.gradle .
+COPY src src
+
+# Construir el proyecto
+RUN gradle build -x test
+
+FROM eclipse-temurin:21-jre-alpine
+VOLUME /tmp
+COPY --from=build /workspace/app/build/libs/*.jar app.jar
+ENTRYPOINT ["java","-jar","/app.jar"]
