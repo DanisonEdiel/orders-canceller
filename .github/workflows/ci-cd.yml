@@ -40,8 +40,11 @@ jobs:
         echo "PATH=$PWD/gradle-8.5/bin:$PATH" >> $GITHUB_ENV
         gradle --version
         
+    - name: Make gradlew executable
+      run: chmod +x ./gradlew
+        
     - name: Build with Gradle (Skip Tests)
-      run: gradle build -x test
+      run: ./gradlew build -x test
       
     - name: Save Build Artifact
       uses: actions/upload-artifact@v4
@@ -80,7 +83,7 @@ jobs:
         context: .
         push: true
         tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/orders-update:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/orders-update:${{ github.sha }}
-        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/orders-update:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:${{ github.sha }}
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
         cache-to: type=inline
