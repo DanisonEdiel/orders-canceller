@@ -2,80 +2,185 @@ name: Deploy to EC2
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up JDK 21
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        
-    - name: Make gradlew executable
-      run: chmod +x ./gradlew
-        
-    - name: Build with Gradle
-      run: ./gradlew build -x test
-      
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-        
-    - name: Build and Push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
-        
-    - name: Deploy to EC2
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          # Create directory if it doesn't exist
-          mkdir -p ~/orders-canceler
-          
-          # Create .env file with environment variables
-          cat > ~/orders-canceler/.env << EOF
-          SPRING_DATASOURCE_URL=${{ secrets.DB_URL }}
-          SPRING_DATASOURCE_USERNAME=${{ secrets.DB_USERNAME }}
-          SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
-          SPRING_PROFILES_ACTIVE=production
-          SERVER_PORT=8080
-          EOF
-          
-          # Create or update docker-compose.yml
-          cat > ~/orders-canceler/docker-compose.yml << EOF
-          version: '3'
-          services:
-            orders-canceler:
-              image: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
-              ports:
-                - "8080:8080"
-              env_file:
-                - .env
-              restart: always
-          EOF
-          
-          # Install docker-compose if not installed
-          if ! command -v docker-compose &> /dev/null; then
-            sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-          fi
-          
-          # Pull the latest image and restart the container
-          cd ~/orders-canceler
-          sudo docker-compose pull
-          sudo docker-compose up -d
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Install Gradle 8.5
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          export PATH=$PWD/gradle-8.5/bin:$PATH
+          echo "PATH=$PWD/gradle-8.5/bin:$PATH" >> $GITHUB_ENV
+          gradle --version
+
+      - name: Build with Gradle
+        run: gradle build -x test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest,${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:${{ github.sha }}
+          no-cache: true
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 180s
+          command_timeout: 20m
+          debug: true
+          script: |
+            # Verificar versiones de Docker y Docker Compose
+            docker --version
+            docker-compose --version
+            
+            # Mostrar contenedores actuales
+            echo "Contenedores actuales:"
+            docker ps
+            
+            # Crear directorio si no existe
+            mkdir -p ~/orders-canceler
+            cd ~/orders-canceler
+            
+            # Detener contenedores existentes
+            echo "Deteniendo contenedores existentes..."
+            docker-compose down || true
+            docker rm -f orders-canceler orders-db orders-grafana || true
+            
+            # Eliminar imágenes antiguas
+            echo "Eliminando imágenes antiguas..."
+            docker rmi -f ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest || true
+            
+            # Descargar imagen más reciente
+            echo "Descargando imagen más reciente..."
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
+            
+            # Crear .env file con secretos
+            cat > .env << EOL
+            SPRING_DATASOURCE_URL=${{ secrets.DB_URL }}
+            SPRING_DATASOURCE_USERNAME=${{ secrets.DB_USERNAME }}
+            SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
+            SPRING_PROFILES_ACTIVE=production
+            SERVER_PORT=8080
+            EOL
+            
+            # Crear o actualizar docker-compose.yml
+            echo "Creando docker-compose.yml..."
+            cat > docker-compose.yml << EOL
+            version: '3.8'
+            
+            services:
+              orders-canceler:
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
+                container_name: orders-canceler
+                restart: always
+                ports:
+                  - "8080:8080"
+                env_file:
+                  - .env
+                networks:
+                  - orders-network
+              
+              postgres:
+                image: postgres:14
+                container_name: orders-db
+                restart: always
+                environment:
+                  POSTGRES_DB: orders_db
+                  POSTGRES_USER: \${SPRING_DATASOURCE_USERNAME}
+                  POSTGRES_PASSWORD: \${SPRING_DATASOURCE_PASSWORD}
+                ports:
+                  - "5432:5432"
+                volumes:
+                  - postgres-data:/var/lib/postgresql/data
+                networks:
+                  - orders-network
+              
+              grafana:
+                image: grafana/grafana
+                container_name: orders-grafana
+                restart: always
+                ports:
+                  - "3000:3000"
+                environment:
+                  - GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+                  - GF_USERS_ALLOW_SIGN_UP=false
+                  - GF_INSTALL_PLUGINS=grafana-postgresql-datasource
+                volumes:
+                  - grafana-data:/var/lib/grafana
+                networks:
+                  - orders-network
+            
+            volumes:
+              postgres-data:
+              grafana-data:
+            
+            networks:
+              orders-network:
+                driver: bridge
+            EOL
+            
+            # Mostrar contenido del docker-compose.yml
+            echo "Contenido de docker-compose.yml:"
+            cat docker-compose.yml
+            
+            # Eliminar red existente si existe
+            echo "Eliminando red existente si existe..."
+            docker network rm orders-network || true
+            
+            # Iniciar servicios
+            echo "Iniciando servicios..."
+            docker-compose up -d --force-recreate
+            
+            # Esperar a que los contenedores estén en funcionamiento
+            echo "Esperando a que los contenedores estén en funcionamiento..."
+            sleep 10
+            
+            # Verificar estado de los contenedores
+            echo "Estado de los contenedores:"
+            docker ps
+            
+            # Mostrar contenedores en ejecución
+            echo "Contenedores en ejecución:"
+            docker ps
+            
+            # Mostrar logs del contenedor principal
+            echo "Logs del contenedor orders-canceler:"
+            docker logs orders-canceler
+            
+            # Información de depuración
+            echo "Información de depuración:"
+            echo "Redes Docker:"
+            docker network ls
+            echo "Volúmenes Docker:"
+            docker volume ls
+            echo "Logs detallados del contenedor orders-canceler (últimas 50 líneas):"
+            docker logs orders-canceler --tail 50
