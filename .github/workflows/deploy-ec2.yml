@@ -112,6 +112,14 @@ jobs:
             echo "Descargando imagen más reciente..."
             sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
             
+            # Crear .env file con secretos
+            cat > .env << EOL
+            DB_URL=${{ secrets.DB_URL }}
+            DB_USERNAME=${{ secrets.DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            ORDER_CANCELED_TOPIC_ARN=${{ secrets.ORDER_CANCELED_TOPIC_ARN }}
+            EOL
+            
             # Crear o actualizar docker-compose.yml
             echo "Creando docker-compose.yml..."
             cat > docker-compose.yml << EOL
@@ -124,12 +132,8 @@ jobs:
                 restart: always
                 ports:
                   - "8080:8080"
-                environment:
-                  - DB_URL=${{ secrets.DB_URL }}
-                  - DB_USERNAME=${{ secrets.DB_USERNAME }}
-                  - DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  - ORDER_CANCELED_TOPIC_ARN=${{ secrets.ORDER_CANCELED_TOPIC_ARN }}
-                  - SERVER_PORT=8080
+                env_file:
+                  - .env
                 networks:
                   - orders-network
               
