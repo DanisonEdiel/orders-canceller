@@ -42,15 +42,22 @@ jobs:
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_PRIVATE_KEY }}
+        key: ${{ secrets.EC2_SSH_KEY }}
         script: |
+          # Create directory if it doesn't exist
+          mkdir -p ~/orders-canceler
+          
           # Create .env file with environment variables
           cat > ~/orders-canceler/.env << EOF
-          DB_URL=${{ secrets.DB_URL }}
-          DB_USERNAME=${{ secrets.DB_USERNAME }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          AUTH_SERVICE_URL=${{ secrets.AUTH_SERVICE_URL }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          SPRING_DATASOURCE_URL=${{ secrets.DB_URL }}
+          SPRING_DATASOURCE_USERNAME=${{ secrets.DB_USERNAME }}
+          SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
+          SPRING_PROFILES_ACTIVE=production
+          SERVER_PORT=8082
+          AWS_REGION=${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SNS_TOPIC_ARN=${{ secrets.SNS_TOPIC_ARN }}
           EOF
           
           # Create or update docker-compose.yml
@@ -66,7 +73,13 @@ jobs:
               restart: always
           EOF
           
+          # Install docker-compose if not installed
+          if ! command -v docker-compose &> /dev/null; then
+            sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+          
           # Pull the latest image and restart the container
           cd ~/orders-canceler
-          docker-compose pull
-          docker-compose up -d
+          sudo docker-compose pull
+          sudo docker-compose up -d
