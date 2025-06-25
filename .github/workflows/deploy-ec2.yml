@@ -47,7 +47,7 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest,${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:${{ github.sha }}
           no-cache: true
 
-      - name: Deploy to EC2
+      - name: Deploy to EC2 instance
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
