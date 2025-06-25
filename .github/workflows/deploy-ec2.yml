@@ -47,7 +47,7 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest,${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:${{ github.sha }}
           no-cache: true
 
-      - name: Deploy to EC2 instance
+      - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -112,12 +112,16 @@ jobs:
             echo "Descargando imagen más reciente..."
             sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/orders-canceler:latest
             
-            # Crear .env file con secretos
-            cat > .env << EOL
-            DB_URL=${{ secrets.DB_URL }}
-            DB_USERNAME=${{ secrets.DB_USERNAME }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            ORDER_CANCELED_TOPIC_ARN=${{ secrets.ORDER_CANCELED_TOPIC_ARN }}
+            # Crear archivo application.properties para la aplicación
+            cat > application.properties << EOL
+            spring.datasource.url=${{ secrets.DB_URL }}
+            spring.datasource.username=${{ secrets.DB_USERNAME }}
+            spring.datasource.password=${{ secrets.DB_PASSWORD }}
+            spring.datasource.driver-class-name=org.postgresql.Driver
+            spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+            spring.jpa.hibernate.ddl-auto=none
+            server.port=8080
+            order.canceled.topic.arn=${{ secrets.ORDER_CANCELED_TOPIC_ARN }}
             EOL
             
             # Crear o actualizar docker-compose.yml
@@ -132,8 +136,9 @@ jobs:
                 restart: always
                 ports:
                   - "8080:8080"
-                env_file:
-                  - .env
+                volumes:
+                  - ./application.properties:/application.properties
+                command: ["java", "-jar", "/app.jar", "--spring.config.location=file:/application.properties"]
                 networks:
                   - orders-network
               
